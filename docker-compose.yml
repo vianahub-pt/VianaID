@@ -1,0 +1,80 @@
+# ==================================================
+# Docker Compose - VianaHub.VianaID
+# Ambiente completo para desenvolvimento local
+# ==================================================
+version: '3.8'
+
+services:
+  # --------------------------------------------------
+  # SQL Server
+  # --------------------------------------------------
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: vianaid-sqlserver
+    hostname: sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "VianaHub@2024"
+      MSSQL_PID: "Developer"
+      MSSQL_TCP_PORT: 1433
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    networks:
+      - vianaid-network
+    healthcheck:
+      test: /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "VianaHub@2024" -Q "SELECT 1" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # --------------------------------------------------
+  # VianaID API
+  # --------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_CONFIGURATION: Release
+    container_name: vianaid-api
+    hostname: api
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Development"
+      ASPNETCORE_URLS: "http://+:8080"
+      ConnectionStrings__VianaIDConnection: "Server=sqlserver,1433;Initial Catalog=VianaID;User ID=sa;Password=VianaHub@2024;Encrypt=True;TrustServerCertificate=True;Connection Timeout=30"
+      ConnectionStrings__HangfireConnection: "Server=sqlserver,1433;Initial Catalog=VianaHangfire;User ID=sa;Password=VianaHub@2024;Encrypt=True;TrustServerCertificate=True;Connection Timeout=30"
+      JwtKeyManagement__EncryptionKey: "VianaHub-Docker-Key-2024-Development-32BytesLongForAES256Encryption!!"
+      Serilog__MinimumLevel__Default: "Information"
+      TZ: "America/Sao_Paulo"
+    ports:
+      - "8080:8080"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    networks:
+      - vianaid-network
+    volumes:
+      - api-logs:/app/logs
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8080/health/live || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+networks:
+  vianaid-network:
+    driver: bridge
+    name: vianaid-network
+
+volumes:
+  sqlserver-data:
+    name: vianaid-sqlserver-data
+  api-logs:
+    name: vianaid-api-logs

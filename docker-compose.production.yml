@@ -1,0 +1,77 @@
+# ==================================================
+# Docker Compose - Ambiente de Produção
+# ==================================================
+version: '3.8'
+
+services:
+  # --------------------------------------------------
+  # VianaID API - Produção
+  # --------------------------------------------------
+  api:
+    image: ${DOCKER_REGISTRY:-vianahub}/vianaid-api:${IMAGE_TAG:-latest}
+    container_name: vianaid-api
+    hostname: api
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Production"
+      ASPNETCORE_URLS: "http://+:8080"
+      # Connection strings devem vir de secrets (Azure Key Vault, Kubernetes Secrets, etc)
+      ConnectionStrings__VianaIDConnection: "${DB_CONNECTION_STRING}"
+      ConnectionStrings__HangfireConnection: "${HANGFIRE_CONNECTION_STRING}"
+      # Chave de criptografia deve vir de Key Vault
+      JwtKeyManagement__EncryptionKey: "${JWT_ENCRYPTION_KEY}"
+      # Configurações de logging
+      Serilog__MinimumLevel__Default: "Warning"
+      # CORS origins de produção
+      Cors__AllowedOrigins__0: "${CORS_ORIGIN_1}"
+      Cors__AllowedOrigins__1: "${CORS_ORIGIN_2}"
+      # Timezone
+      TZ: "America/Sao_Paulo"
+    ports:
+      - "8080:8080"
+    networks:
+      - vianaid-network
+    volumes:
+      - api-logs:/app/logs:rw
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        order: start-first
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8080/health/live || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  vianaid-network:
+    driver: overlay
+    name: vianaid-network
+
+volumes:
+  api-logs:
+    driver: local
+    name: vianaid-api-logs
